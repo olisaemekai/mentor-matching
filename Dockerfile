@@ -1,43 +1,58 @@
-# Stage 1 - Build Frontend (Vite)
-FROM node:18 AS frontend
+# Multi-stage Dockerfile for Laravel production deployment
+#  - Stage 1: install composer dependencies (no-dev) using the official composer image
+#  - Stage 2: build a slim PHP-FPM image with required extensions and copy application + vendor
+
+FROM composer:2 AS vendor
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
+COPY composer.json composer.lock ./
+# Install production dependencies into /app/vendor
+RUN composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-plugins --no-scripts
+
+FROM php:8.2-fpm-alpine
+
+# system deps and build dependencies for building extensions
+RUN apk add --no-cache --virtual .build-deps \
+    $PHPIZE_DEPS \
+    icu-dev \
+    libxml2-dev \
+    libpng-dev \
+    libjpeg-turbo-dev \
+    libwebp-dev \
+    zlib-dev \
+    oniguruma-dev \
+    bash \
+    git \
+    openssh \
+    zip \
+    unzip \
+    && apk add --no-cache --update libpng libjpeg-turbo libwebp zlib icu-dev
+
+# Configure and install PHP extensions commonly required by Laravel
+RUN docker-php-ext-configure gd --with-jpeg --with-webp \
+    && docker-php-ext-install -j$(nproc) pdo pdo_mysql mbstring exif pcntl bcmath gd intl xml opcache \
+    && pecl install redis || true \
+    && docker-php-ext-enable redis || true
+
+# Cleanup build dependencies
+RUN apk del .build-deps \
+    && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+WORKDIR /var/www/html
+
+# Copy vendor from the composer stage
+COPY --from=vendor /app/vendor ./vendor
+
+# Copy application files
 COPY . .
-RUN npm run build
 
-# Stage 2 - Backend (Laravel + PHP + Composer)
-FROM php:8.2-fpm AS backend
+# Ensure permissions for storage & bootstrap cache (may be overridden at run-time)
+RUN set -eux \
+    && mkdir -p storage/framework storage/logs bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache || true \
+    && chmod -R 755 storage bootstrap/cache || true
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git curl unzip libpq-dev libonig-dev libzip-dev zip \
-    && docker-php-ext-install pdo pdo_mysql mbstring zip
+# Expose PHP-FPM port
+EXPOSE 9000
 
-# Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
-WORKDIR /var/www
-
-# Copy app files
-COPY . .
-
-# Copy built frontend from Stage 1
-COPY --from=frontend /app/public/dist ./public/dist
-
-# ---------------------------
-# Create SQLite database file
-# ---------------------------
-RUN mkdir -p /var/www/database \
-    && touch /var/www/database/database.sqlite \
-    && chmod 777 /var/www/database/database.sqlite
-
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
-
-# Laravel setup
-RUN php artisan config:clear && \
-    php artisan route:clear && \
-    php artisan view:clear
-
+# Use the default php-fpm command
 CMD ["php-fpm"]

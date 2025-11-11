@@ -1,0 +1,21 @@
+# Ignore files that should not be copied into the Docker image
+vendor
+node_modules
+.env
+.env.*
+storage/*.key
+storage/*.sqlite
+storage/debugbar
+storage/logs
+storage/framework/cache/data
+storage/framework/sessions
+storage/framework/testing
+/.git
+.gitignore
+.github
+/.vscode
+npm-debug.log
+yarn-error.log
+README.md
+tests
+tests/*
