@@ -51,8 +51,9 @@ RUN set -eux \
     && chown -R www-data:www-data storage bootstrap/cache || true \
     && chmod -R 755 storage bootstrap/cache || true
 
-# Expose PHP-FPM port
-EXPOSE 9000
+# Expose an HTTP port Render can detect
+EXPOSE 8000
 
-# Use the default php-fpm command
-CMD ["php-fpm"]
+# Start PHP built-in web server so Render's port scan detects an HTTP listener.
+# For small deployments this is sufficient; for production you may prefer nginx + php-fpm.
+CMD ["sh", "-lc", "php -S 0.0.0.0:8000 -t public public/index.php"]
